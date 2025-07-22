@@ -102,3 +102,99 @@
   )
 )
 
+;; Update participant record after successful claim
+(define-private (update-participant-record
+    (user principal)
+    (claimed-amount uint)
+  )
+  (match (map-get? participants user)
+    current-info (ok (map-set participants user
+      (merge current-info {
+        last-claim-height: stacks-block-height,
+        total-claimed: (+ (get total-claimed current-info) claimed-amount),
+        claims-count: (+ (get claims-count current-info) u1),
+      })
+    ))
+    ERR-NOT-REGISTERED
+  )
+)
+
+;; Validate governance proposal types
+(define-private (is-valid-proposal-type (proposal-type (string-ascii 32)))
+  (or
+    (is-eq proposal-type "distribution-amount")
+    (is-eq proposal-type "distribution-interval")
+    (is-eq proposal-type "minimum-balance")
+  )
+)
+
+;; Validate proposed values for governance
+(define-private (is-valid-proposed-value (value uint))
+  (and
+    (> value u0)
+    (<= value MAX-PROPOSED-VALUE)
+  )
+)
+
+;; PUBLIC FUNCTIONS
+
+;; Register new participant in BitStack UBI
+(define-public (register)
+  (let ((existing-record (map-get? participants tx-sender)))
+    (asserts! (is-none existing-record) ERR-ALREADY-REGISTERED)
+    (asserts! (not (var-get paused)) ERR-CONTRACT-PAUSED)
+    (map-set participants tx-sender {
+      registered: true,
+      last-claim-height: u0,
+      total-claimed: u0,
+      verification-status: false,
+      join-height: stacks-block-height,
+      claims-count: u0,
+    })
+    (var-set total-participants (+ (var-get total-participants) u1))
+    (ok true)
+  )
+)
+
+;; Verify participant (admin only)
+(define-public (verify-participant (user principal))
+  (begin
+    (asserts! (is-contract-owner) ERR-OWNER-ONLY)
+    (asserts! (is-some (map-get? participants user)) ERR-NOT-REGISTERED)
+    (map-set participants user
+      (merge (unwrap! (map-get? participants user) ERR-NOT-REGISTERED) { verification-status: true })
+    )
+    (ok true)
+  )
+)
+
+;; Claim UBI distribution
+(define-public (claim-ubi)
+  (let (
+      (user tx-sender)
+      (distribution-amt (var-get distribution-amount))
+    )
+    (asserts! (not (var-get paused)) ERR-CONTRACT-PAUSED)
+    (asserts! (is-eligible user) ERR-INELIGIBLE)
+    (asserts! (>= (var-get treasury-balance) distribution-amt)
+      ERR-INSUFFICIENT-FUNDS
+    )
+    ;; Transfer STX to participant
+    (try! (as-contract (stx-transfer? distribution-amt tx-sender user)))
+    ;; Update treasury and participant records
+    (var-set treasury-balance (- (var-get treasury-balance) distribution-amt))
+    (try! (update-participant-record user distribution-amt))
+    (ok distribution-amt)
+  )
+)
+
+;; Contribute funds to treasury
+(define-public (contribute (amount uint))
+  (begin
+    (asserts! (> amount u0) ERR-INVALID-AMOUNT)
+    (asserts! (not (var-get paused)) ERR-CONTRACT-PAUSED)
+    (try! (stx-transfer? amount tx-sender (as-contract tx-sender)))
+    (var-set treasury-balance (+ (var-get treasury-balance) amount))
+    (ok amount)
+  )
+)
