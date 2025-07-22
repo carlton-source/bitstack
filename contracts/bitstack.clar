@@ -198,3 +198,128 @@
     (ok amount)
   )
 )
+
+;; GOVERNANCE SYSTEM
+
+;; Submit governance proposal
+(define-public (submit-proposal
+    (proposal-type (string-ascii 32))
+    (proposed-value uint)
+  )
+  (let ((new-proposal-id (+ (var-get proposal-counter) u1)))
+    (asserts! (is-some (map-get? participants tx-sender)) ERR-NOT-REGISTERED)
+    (asserts! (is-valid-proposal-type proposal-type) ERR-INVALID-PROPOSAL)
+    (asserts! (is-valid-proposed-value proposed-value) ERR-INVALID-VALUE)
+    (asserts! (not (var-get paused)) ERR-CONTRACT-PAUSED)
+    (map-set governance-proposals new-proposal-id {
+      proposer: tx-sender,
+      proposal-type: proposal-type,
+      proposed-value: proposed-value,
+      votes-for: u0,
+      votes-against: u0,
+      status: "active",
+      expiry-height: (+ stacks-block-height PROPOSAL-VOTING-PERIOD),
+    })
+    (var-set proposal-counter new-proposal-id)
+    (ok new-proposal-id)
+  )
+)
+
+;; Vote on governance proposal
+(define-public (vote
+    (proposal-id uint)
+    (vote-for bool)
+  )
+  (let (
+      (proposal (unwrap! (map-get? governance-proposals proposal-id) ERR-INVALID-PROPOSAL))
+      (voter-key {
+        proposal-id: proposal-id,
+        voter: tx-sender,
+      })
+    )
+    (asserts! (is-some (map-get? participants tx-sender)) ERR-NOT-REGISTERED)
+    (asserts! (is-none (map-get? voter-records voter-key)) ERR-ALREADY-VOTED)
+    (asserts! (<= proposal-id (var-get proposal-counter)) ERR-INVALID-PROPOSAL)
+    (asserts! (< stacks-block-height (get expiry-height proposal))
+      ERR-EXPIRED-PROPOSAL
+    )
+    (asserts! (is-eq (get status proposal) "active") ERR-INVALID-PROPOSAL)
+    ;; Record vote
+    (map-set voter-records voter-key true)
+    (map-set governance-proposals proposal-id
+      (merge proposal {
+        votes-for: (if vote-for
+          (+ (get votes-for proposal) u1)
+          (get votes-for proposal)
+        ),
+        votes-against: (if vote-for
+          (get votes-against proposal)
+          (+ (get votes-against proposal) u1)
+        ),
+      })
+    )
+    (ok true)
+  )
+)
+
+;; EMERGENCY FUNCTIONS
+
+;; Pause contract operations
+(define-public (pause)
+  (begin
+    (asserts! (is-contract-owner) ERR-OWNER-ONLY)
+    (var-set paused true)
+    (ok true)
+  )
+)
+
+;; Resume contract operations
+(define-public (unpause)
+  (begin
+    (asserts! (is-contract-owner) ERR-OWNER-ONLY)
+    (var-set paused false)
+    (ok true)
+  )
+)
+
+;; READ-ONLY FUNCTIONS
+
+;; Get participant information
+(define-read-only (get-participant-info (user principal))
+  (map-get? participants user)
+)
+
+;; Get current treasury balance
+(define-read-only (get-treasury-balance)
+  (var-get treasury-balance)
+)
+
+;; Get governance proposal details
+(define-read-only (get-proposal (proposal-id uint))
+  (map-get? governance-proposals proposal-id)
+)
+
+;; Get distribution configuration
+(define-read-only (get-distribution-info)
+  {
+    amount: (var-get distribution-amount),
+    interval: DISTRIBUTION-INTERVAL,
+    last-height: (var-get last-distribution-height),
+    minimum-balance: MINIMUM-BALANCE,
+    total-participants: (var-get total-participants),
+  }
+)
+
+;; Check if user can claim UBI
+(define-read-only (can-claim-ubi (user principal))
+  (is-eligible user)
+)
+
+;; Get contract status
+(define-read-only (get-contract-status)
+  {
+    paused: (var-get paused),
+    owner: CONTRACT-OWNER,
+    total-proposals: (var-get proposal-counter),
+  }
+)
