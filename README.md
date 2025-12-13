@@ -2,19 +2,24 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Stacks](https://img.shields.io/badge/Stacks-2.0-purple.svg)](https://stacks.co)
-[![Clarity](https://img.shields.io/badge/Clarity-Smart%20Contract-orange.svg)](https://clarity-lang.org)
+[![Clarity](https://img.shields.io/badge/Clarity-4-orange.svg)](https://clarity-lang.org)
 
 ## Overview
 
 BitStack UBI is a decentralized Universal Basic Income protocol built on the Stacks blockchain, leveraging Bitcoin's security to provide sustainable and transparent UBI distribution. The protocol enables participants to register, undergo verification, and receive periodic STX distributions from a community-managed treasury through democratic governance.
 
+**Now upgraded to Clarity 4** with enhanced security features, improved asset management, and comprehensive event logging.
+
 ### Key Features
 
 - **Bitcoin-Secured**: Built on Stacks Layer 2 for Bitcoin security
-- **Democratic Governance**: Community-driven parameter adjustments
-- **Transparent Operations**: All distributions and activities are on-chain
-- **Emergency Controls**: Pause/unpause functionality for security
+- **Clarity 4 Compliant**: Uses latest security enhancements and asset allowances
+- **Democratic Governance**: Community-driven parameter adjustments with execution
+- **Transparent Operations**: All distributions and activities are on-chain with event logging
+- **Emergency Controls**: Pause/unpause functionality with emergency withdrawal
 - **Comprehensive Tracking**: Complete audit trail of participant activity
+- **Real-time Balance**: Direct STX balance tracking prevents sync issues
+- **Flexible Participation**: Users can unregister when needed
 
 ## System Overview
 
@@ -51,14 +56,17 @@ graph TD
 #### 2. **Treasury System**
 
 - Community-funded treasury
+- Real-time balance tracking via `stx-get-balance`
 - Automatic distribution calculations
 - Balance management and validation
-- Contribution tracking
+- Contribution tracking with event logging
 
 #### 3. **Governance Framework**
 
 - Proposal submission system
-- Democratic voting mechanism
+- Democratic voting mechanism with quorum (10 votes minimum)
+- Approval threshold enforcement (60% required)
+- Proposal execution after voting period
 - Parameter adjustment capabilities
 - Voting period management
 
@@ -66,7 +74,15 @@ graph TD
 
 - Contract pause/unpause functionality
 - Owner-only administrative functions
+- Emergency withdrawal capability (only when paused)
 - Emergency intervention capabilities
+
+#### 5. **Event System**
+
+- Complete event logging for all operations
+- Frontend integration ready
+- Audit trail for compliance
+- Events emitted: registration, verification, claims, contributions, proposals, votes, execution, withdrawals
 
 ### Data Structures
 
@@ -110,7 +126,13 @@ Contributions → Treasury Balance → Distribution Calculation → Payment
 ### 3. Governance Flow
 
 ```
-Proposal Submission → Voting Period → Vote Counting → Parameter Update
+Proposal Submission → Voting Period → Vote Counting → Quorum Check → Approval Check → Execution → Parameter Update
+```
+
+### 4. Event Emission Flow
+
+```
+Contract Action → Event Emission → Frontend Listener → UI Update / Analytics
 ```
 
 ## Getting Started
@@ -187,6 +209,12 @@ bitstack/
 (contract-call? .bitstack claim-ubi)
 ```
 
+#### 4. Unregister (Optional)
+
+```clarity
+(contract-call? .bitstack unregister)
+```
+
 ### For Contributors
 
 #### Fund the Treasury
@@ -209,15 +237,31 @@ bitstack/
 (contract-call? .bitstack vote u1 true) ;; Vote 'yes' on proposal #1
 ```
 
+#### 3. Execute Approved Proposals (Owner Only)
+
+```clarity
+(contract-call? .bitstack execute-proposal u1)
+```
+
+### For Contract Owner
+
+#### Emergency Withdrawal (When Paused)
+
+```clarity
+(contract-call? .bitstack emergency-withdraw u5000000 'SP2J6ZY48GV1EZ5V2V5RB9MP66SW86PYKKQ9H6DPR)
+```
+
 ## Configuration Parameters
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
 | `DISTRIBUTION-INTERVAL` | 144 blocks | ~1 day between claims |
 | `MINIMUM-BALANCE` | 10 STX | Minimum treasury balance |
-| `DISTRIBUTION-AMOUNT` | 1 STX | Default UBI amount |
+| `DISTRIBUTION-AMOUNT` | 1 STX | Default UBI amount (governable) |
 | `PROPOSAL-VOTING-PERIOD` | 1440 blocks | ~10 days voting period |
 | `MAX-PROPOSED-VALUE` | 1,000,000 STX | Maximum governance proposal value |
+| `PROPOSAL-APPROVAL-THRESHOLD` | 60% | Required approval percentage |
+| `PROPOSAL-QUORUM-THRESHOLD` | 10 votes | Minimum votes for execution |
 
 ## API Reference
 
@@ -226,11 +270,16 @@ bitstack/
 | Function | Parameters | Returns | Description |
 |----------|------------|---------|-------------|
 | `register()` | None | `(response bool uint)` | Register as UBI participant |
+| `unregister()` | None | `(response bool uint)` | Unregister from UBI (if eligible) |
 | `verify-participant(user)` | `principal` | `(response bool uint)` | Verify participant (admin only) |
 | `claim-ubi()` | None | `(response uint uint)` | Claim UBI distribution |
 | `contribute(amount)` | `uint` | `(response uint uint)` | Contribute to treasury |
 | `submit-proposal(type, value)` | `string-ascii`, `uint` | `(response uint uint)` | Submit governance proposal |
 | `vote(proposal-id, vote-for)` | `uint`, `bool` | `(response bool uint)` | Vote on proposal |
+| `execute-proposal(id)` | `uint` | `(response bool uint)` | Execute approved proposal (owner only) |
+| `pause()` | None | `(response bool uint)` | Pause contract (owner only) |
+| `unpause()` | None | `(response bool uint)` | Resume contract (owner only) |
+| `emergency-withdraw(amount, recipient)` | `uint`, `principal` | `(response uint uint)` | Emergency withdrawal when paused (owner only) |
 
 ### Read-Only Functions
 
@@ -247,24 +296,36 @@ bitstack/
 
 ### Access Controls
 
-- **Contract Owner**: Emergency pause/unpause, participant verification
-- **Registered Users**: UBI claims, governance participation
+- **Contract Owner**: Emergency pause/unpause, participant verification, proposal execution, emergency withdrawal
+- **Registered Users**: UBI claims, governance participation, unregister
 - **Anyone**: Registration, treasury contributions
 
 ### Safety Mechanisms
 
-- Cooldown periods between claims
-- Treasury balance validation
+- Cooldown periods between claims (144 blocks)
+- Real-time balance validation via `stx-get-balance`
 - Double-voting prevention
 - Proposal expiry enforcement
 - Emergency pause functionality
+- Emergency withdrawal only when paused
+- Quorum and approval thresholds for governance
+
+### Clarity 4 Security Enhancements
+
+- **Asset Allowances**: Explicit `with-stx` allowances prevent unauthorized transfers
+- **Response Wrapping**: `as-contract?` returns responses for better error handling
+- **Current Contract Keyword**: Direct access to contract principal via `current-contract`
+- **Event Logging**: Complete audit trail of all operations
 
 ### Governance Security
 
-- Time-locked voting periods
+- Time-locked voting periods (1440 blocks)
 - Verified participant requirements
-- Value limits on proposals
+- Value limits on proposals (max 1M STX)
 - Transparent voting records
+- 60% approval threshold
+- 10 vote minimum quorum
+- Owner-only execution after voting period
 
 ## Testing
 
@@ -296,13 +357,26 @@ npx vitest tests/bitstack.test.ts
 - Update documentation for API changes
 - Ensure all tests pass before submitting PR
 
+## Recent Updates (v2.0)
+
+- ✅ **Clarity 4 Upgrade**: Full compatibility with latest Clarity version
+- ✅ **Real-time Balance Tracking**: Direct STX balance queries
+- ✅ **Proposal Execution**: Governance can now actually update parameters
+- ✅ **Event System**: Complete event logging for frontend integration
+- ✅ **Emergency Controls**: Enhanced with withdrawal capability
+- ✅ **Voting Thresholds**: Quorum and approval requirements
+- ✅ **Unregister Feature**: Users can now exit the system
+- ✅ **Improved Security**: Asset allowances and better error handling
+
 ## Roadmap
 
-- [ ] **Phase 1**: Core UBI functionality (✅ Complete)
-- [ ] **Phase 2**: Enhanced governance features
-- [ ] **Phase 3**: Multi-token support
-- [ ] **Phase 4**: Cross-chain integration
-- [ ] **Phase 5**: Mobile application interface
+- [x] **Phase 1**: Core UBI functionality (✅ Complete)
+- [x] **Phase 2**: Enhanced governance features (✅ Complete)
+- [ ] **Phase 3**: Multi-sig verification system
+- [ ] **Phase 4**: Multi-token support (SIP-010)
+- [ ] **Phase 5**: Cross-chain integration
+- [ ] **Phase 6**: Mobile application interface
+- [ ] **Phase 7**: Automated verification system
 
 ## License
 
@@ -314,9 +388,26 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Community**: [Stacks Discord](https://discord.gg/stacks)
 - **Issues**: [GitHub Issues](https://github.com/carlton-source/bitstack/issues)
 
+## Event Types
+
+The contract emits the following events for frontend integration:
+
+| Event | Data | Description |
+|-------|------|-------------|
+| `register` | `user`, `block-height` | New participant registered |
+| `unregister` | `user`, `total-claimed`, `block-height` | Participant unregistered |
+| `verify` | `user`, `verifier`, `block-height` | Participant verified |
+| `claim` | `user`, `amount`, `block-height` | UBI claimed |
+| `contribute` | `contributor`, `amount`, `block-height` | Treasury contribution |
+| `proposal-created` | `proposal-id`, `proposer`, `proposal-type`, `proposed-value` | New proposal submitted |
+| `vote` | `proposal-id`, `voter`, `vote-for` | Vote cast |
+| `proposal-executed` | `proposal-id`, `proposal-type`, `new-value` | Proposal executed |
+| `emergency-withdraw` | `amount`, `recipient`, `block-height` | Emergency withdrawal |
+
 ## Acknowledgments
 
-- Built on [Stacks](https://stacks.co) blockchain
+- Built on [Stacks](https://stacks.co) blockchain with Clarity 4
 - Inspired by Universal Basic Income research
 - Community-driven development approach
 - Bitcoin security and finality
+- Enhanced with latest Clarity security features
