@@ -17,6 +17,8 @@
 (define-constant MINIMUM-BALANCE u10000000) ;; Minimum treasury balance (10 STX)
 (define-constant MAX-PROPOSED-VALUE u1000000000000) ;; Maximum governance proposal value
 (define-constant PROPOSAL-VOTING-PERIOD u1440) ;; ~10 days in blocks
+(define-constant PROPOSAL-APPROVAL-THRESHOLD u60) ;; 60% approval needed
+(define-constant PROPOSAL-QUORUM-THRESHOLD u10) ;; Minimum 10 votes needed
 
 ;; Error codes with descriptive naming
 (define-constant ERR-OWNER-ONLY (err u100))
@@ -35,10 +37,8 @@
 
 ;; DATA VARIABLES
 
-(define-data-var treasury-balance uint u0)
 (define-data-var total-participants uint u0)
 (define-data-var distribution-amount uint u1000000) ;; 1 STX = 1,000,000 microSTX
-(define-data-var last-distribution-height uint u0)
 (define-data-var paused bool false)
 (define-data-var proposal-counter uint u0)
 
@@ -95,7 +95,7 @@
       (>= (- stacks-block-height (get last-claim-height participant-info))
         DISTRIBUTION-INTERVAL
       )
-      (>= (var-get treasury-balance) (var-get distribution-amount))
+      (>= (stx-get-balance current-contract) (var-get distribution-amount))
       (not (var-get paused))
     )
     false
@@ -152,6 +152,11 @@
       claims-count: u0,
     })
     (var-set total-participants (+ (var-get total-participants) u1))
+    (print {
+      event: "register",
+      user: tx-sender,
+      block-height: stacks-block-height
+    })
     (ok true)
   )
 )
@@ -164,6 +169,12 @@
     (map-set participants user
       (merge (unwrap! (map-get? participants user) ERR-NOT-REGISTERED) { verification-status: true })
     )
+    (print {
+      event: "verify",
+      user: user,
+      verifier: tx-sender,
+      block-height: stacks-block-height
+    })
     (ok true)
   )
 )
@@ -176,16 +187,21 @@
     )
     (asserts! (not (var-get paused)) ERR-CONTRACT-PAUSED)
     (asserts! (is-eligible user) ERR-INELIGIBLE)
-    (asserts! (>= (var-get treasury-balance) distribution-amt)
+    (asserts! (>= (stx-get-balance current-contract) distribution-amt)
       ERR-INSUFFICIENT-FUNDS
     )
     ;; Transfer STX to participant
     (try! (as-contract? ((with-stx distribution-amt))
       (unwrap! (stx-transfer? distribution-amt tx-sender user) ERR-INSUFFICIENT-FUNDS)
     ))
-    ;; Update treasury and participant records
-    (var-set treasury-balance (- (var-get treasury-balance) distribution-amt))
+    ;; Update participant records
     (try! (update-participant-record user distribution-amt))
+    (print {
+      event: "claim",
+      user: user,
+      amount: distribution-amt,
+      block-height: stacks-block-height
+    })
     (ok distribution-amt)
   )
 )
@@ -196,7 +212,12 @@
     (asserts! (> amount u0) ERR-INVALID-AMOUNT)
     (asserts! (not (var-get paused)) ERR-CONTRACT-PAUSED)
     (try! (stx-transfer? amount tx-sender current-contract))
-    (var-set treasury-balance (+ (var-get treasury-balance) amount))
+    (print {
+      event: "contribute",
+      contributor: tx-sender,
+      amount: amount,
+      block-height: stacks-block-height
+    })
     (ok amount)
   )
 )
@@ -223,6 +244,13 @@
       expiry-height: (+ stacks-block-height PROPOSAL-VOTING-PERIOD),
     })
     (var-set proposal-counter new-proposal-id)
+    (print {
+      event: "proposal-created",
+      proposal-id: new-proposal-id,
+      proposer: tx-sender,
+      proposal-type: proposal-type,
+      proposed-value: proposed-value
+    })
     (ok new-proposal-id)
   )
 )
@@ -260,6 +288,47 @@
         ),
       })
     )
+    (print {
+      event: "vote",
+      proposal-id: proposal-id,
+      voter: tx-sender,
+      vote-for: vote-for
+    })
+    (ok true)
+  )
+)
+
+;; Execute approved governance proposal (owner only)
+(define-public (execute-proposal (proposal-id uint))
+  (let (
+      (proposal (unwrap! (map-get? governance-proposals proposal-id) ERR-INVALID-PROPOSAL))
+      (total-votes (+ (get votes-for proposal) (get votes-against proposal)))
+      (approval-percentage (if (> total-votes u0)
+        (/ (* (get votes-for proposal) u100) total-votes)
+        u0
+      ))
+    )
+    (asserts! (is-contract-owner) ERR-OWNER-ONLY)
+    (asserts! (is-eq (get status proposal) "active") ERR-INVALID-PROPOSAL)
+    (asserts! (>= stacks-block-height (get expiry-height proposal)) ERR-INVALID-PROPOSAL)
+    ;; Check quorum and approval threshold
+    (asserts! (>= total-votes PROPOSAL-QUORUM-THRESHOLD) ERR-INVALID-PROPOSAL)
+    (asserts! (>= approval-percentage PROPOSAL-APPROVAL-THRESHOLD) ERR-INVALID-PROPOSAL)
+    ;; Apply the proposal
+    (if (is-eq (get proposal-type proposal) "distribution-amount")
+      (var-set distribution-amount (get proposed-value proposal))
+      true
+    )
+    ;; Mark proposal as executed
+    (map-set governance-proposals proposal-id
+      (merge proposal { status: "executed" })
+    )
+    (print {
+      event: "proposal-executed",
+      proposal-id: proposal-id,
+      proposal-type: (get proposal-type proposal),
+      new-value: (get proposed-value proposal)
+    })
     (ok true)
   )
 )
@@ -293,7 +362,7 @@
 
 ;; Get current treasury balance
 (define-read-only (get-treasury-balance)
-  (var-get treasury-balance)
+  (stx-get-balance current-contract)
 )
 
 ;; Get governance proposal details
@@ -306,9 +375,9 @@
   {
     amount: (var-get distribution-amount),
     interval: DISTRIBUTION-INTERVAL,
-    last-height: (var-get last-distribution-height),
     minimum-balance: MINIMUM-BALANCE,
     total-participants: (var-get total-participants),
+    treasury-balance: (stx-get-balance current-contract),
   }
 )
 
