@@ -34,6 +34,8 @@
 (define-constant ERR-INVALID-VALUE (err u110))
 (define-constant ERR-ALREADY-VOTED (err u111))
 (define-constant ERR-CONTRACT-PAUSED (err u112))
+(define-constant ERR-PROPOSAL-NOT-APPROVED (err u113))
+(define-constant ERR-QUORUM-NOT-MET (err u114))
 
 ;; DATA VARIABLES
 
@@ -155,6 +157,24 @@
     (print {
       event: "register",
       user: tx-sender,
+      block-height: stacks-block-height
+    })
+    (ok true)
+  )
+)
+
+;; Unregister from BitStack UBI (can only unregister if no pending claims)
+(define-public (unregister)
+  (let (
+      (participant-info (unwrap! (map-get? participants tx-sender) ERR-NOT-REGISTERED))
+    )
+    (asserts! (not (is-eligible tx-sender)) ERR-INELIGIBLE)
+    (map-delete participants tx-sender)
+    (var-set total-participants (- (var-get total-participants) u1))
+    (print {
+      event: "unregister",
+      user: tx-sender,
+      total-claimed: (get total-claimed participant-info),
       block-height: stacks-block-height
     })
     (ok true)
@@ -312,8 +332,8 @@
     (asserts! (is-eq (get status proposal) "active") ERR-INVALID-PROPOSAL)
     (asserts! (>= stacks-block-height (get expiry-height proposal)) ERR-INVALID-PROPOSAL)
     ;; Check quorum and approval threshold
-    (asserts! (>= total-votes PROPOSAL-QUORUM-THRESHOLD) ERR-INVALID-PROPOSAL)
-    (asserts! (>= approval-percentage PROPOSAL-APPROVAL-THRESHOLD) ERR-INVALID-PROPOSAL)
+    (asserts! (>= total-votes PROPOSAL-QUORUM-THRESHOLD) ERR-QUORUM-NOT-MET)
+    (asserts! (>= approval-percentage PROPOSAL-APPROVAL-THRESHOLD) ERR-PROPOSAL-NOT-APPROVED)
     ;; Apply the proposal
     (if (is-eq (get proposal-type proposal) "distribution-amount")
       (var-set distribution-amount (get proposed-value proposal))
@@ -350,6 +370,26 @@
     (asserts! (is-contract-owner) ERR-OWNER-ONLY)
     (var-set paused false)
     (ok true)
+  )
+)
+
+;; Emergency withdraw (owner only, when paused)
+(define-public (emergency-withdraw (amount uint) (recipient principal))
+  (begin
+    (asserts! (is-contract-owner) ERR-OWNER-ONLY)
+    (asserts! (var-get paused) ERR-UNAUTHORIZED)
+    (asserts! (> amount u0) ERR-INVALID-AMOUNT)
+    (asserts! (<= amount (stx-get-balance current-contract)) ERR-INSUFFICIENT-FUNDS)
+    (try! (as-contract? ((with-stx amount))
+      (unwrap! (stx-transfer? amount tx-sender recipient) ERR-INSUFFICIENT-FUNDS)
+    ))
+    (print {
+      event: "emergency-withdraw",
+      amount: amount,
+      recipient: recipient,
+      block-height: stacks-block-height
+    })
+    (ok amount)
   )
 )
 
