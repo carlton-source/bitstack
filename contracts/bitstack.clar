@@ -193,7 +193,7 @@
   (begin
     (asserts! (> amount u0) ERR-INVALID-AMOUNT)
     (asserts! (not (var-get paused)) ERR-CONTRACT-PAUSED)
-    (try! (stx-transfer? amount tx-sender (as-contract tx-sender)))
+    (try! (stx-transfer? amount tx-sender current-contract))
     (var-set treasury-balance (+ (var-get treasury-balance) amount))
     (ok amount)
   )
