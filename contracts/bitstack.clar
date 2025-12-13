@@ -180,7 +180,9 @@
       ERR-INSUFFICIENT-FUNDS
     )
     ;; Transfer STX to participant
-    (try! (as-contract? ((with-stx distribution-amt)) (stx-transfer? distribution-amt tx-sender user)))
+    (try! (as-contract? ((with-stx distribution-amt))
+      (unwrap! (stx-transfer? distribution-amt tx-sender user) ERR-INSUFFICIENT-FUNDS)
+    ))
     ;; Update treasury and participant records
     (var-set treasury-balance (- (var-get treasury-balance) distribution-amt))
     (try! (update-participant-record user distribution-amt))
